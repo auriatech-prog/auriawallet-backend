@@ -1,8 +1,11 @@
+import type { SupportedCurrency } from '../../config/currencies.js';
+import type { ProviderRateResult } from './exchange-rates.provider.js';
+
 export interface CachedRateEntry {
-  fromCurrency: string;
-  toCurrency: string;
+  fromCurrency: SupportedCurrency;
+  toCurrency: SupportedCurrency;
   rate: string;
-  provider: string;
+  provider: ProviderRateResult['provider'];
   fetchedAt: string;
   expiresAt: number;
 }
@@ -12,14 +15,17 @@ export class ExchangeRateCache {
   private readonly ttlMs: number;
 
   constructor(ttlMs = 5 * 60 * 1000) {
+    if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+      throw new RangeError('El TTL de caché debe ser un número positivo.');
+    }
     this.ttlMs = ttlMs;
   }
 
-  private getKey(from: string, to: string): string {
-    return `${from}_${to}`;
+  private getKey(from: SupportedCurrency, to: SupportedCurrency): string {
+    return `${from}:${to}`;
   }
 
-  public get(from: string, to: string): CachedRateEntry | null {
+  public get(from: SupportedCurrency, to: SupportedCurrency): CachedRateEntry | null {
     const entry = this.store.get(this.getKey(from, to));
     if (!entry) return null;
 
@@ -32,10 +38,10 @@ export class ExchangeRateCache {
   }
 
   public set(
-    from: string,
-    to: string,
+    from: SupportedCurrency,
+    to: SupportedCurrency,
     rate: string,
-    provider: string,
+    provider: ProviderRateResult['provider'],
     fetchedAt: string
   ): CachedRateEntry {
     const entry: CachedRateEntry = {

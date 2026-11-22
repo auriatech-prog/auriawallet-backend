@@ -29,14 +29,14 @@ async function fetchFromExchangeRateApi(
   from: SupportedCurrency,
   to: SupportedCurrency
 ): Promise<ProviderRateResult> {
-  const baseUrl = process.env.EXCHANGE_RATE_API_URL || 'https://open.er-api.com/v6/latest';
+  const baseUrl = (process.env.EXCHANGE_RATE_API_URL || 'https://open.er-api.com/v6/latest').replace(/\/+$/, '');
   const data = await fetchJsonWithTimeout<{
     result?: string;
-    rates?: Record<string, number>;
+    rates?: Record<string, unknown>;
   }>(`${baseUrl}/${from}`);
 
   const rawRate = data?.rates?.[to];
-  if (data?.result !== 'success' || typeof rawRate !== 'number' || rawRate <= 0) {
+  if (data?.result !== 'success' || typeof rawRate !== 'number' || !Number.isFinite(rawRate) || rawRate <= 0) {
     throw new Error('Respuesta inválida de ExchangeRate-API');
   }
 
@@ -51,26 +51,13 @@ async function fetchFromFrankfurter(
   from: SupportedCurrency,
   to: SupportedCurrency
 ): Promise<ProviderRateResult> {
-  const baseUrl = process.env.FRANKFURTER_API_URL || 'https://api.frankfurter.app';
-
-  // Frankfurter opera principalmente con divisas internacionales (USD/EUR); si involucra ARS sin soporte directo, intenta vía EUR
-  if (from === 'ARS' || to === 'ARS') {
-    const eurData = await fetchJsonWithTimeout<{ rates?: Record<string, number> }>(
-      `${baseUrl}/latest?from=EUR&to=USD`
-    );
-    const usdPerEur = eurData?.rates?.USD;
-    if (typeof usdPerEur !== 'number' || usdPerEur <= 0) {
-      throw new Error('No se pudo obtener respaldo de Frankfurter para par con ARS');
-    }
-    throw new Error('Frankfurter no provee cotización directa para ARS');
-  }
-
+  const baseUrl = (process.env.FRANKFURTER_API_URL || 'https://api.frankfurter.app').replace(/\/+$/, '');
   const data = await fetchJsonWithTimeout<{ rates?: Record<string, number> }>(
-    `${baseUrl}/latest?from=${from}&to=${to}`
+    `${baseUrl}/latest?${new URLSearchParams({ from, to })}`
   );
   const rawRate = data?.rates?.[to];
 
-  if (typeof rawRate !== 'number' || rawRate <= 0) {
+  if (typeof rawRate !== 'number' || !Number.isFinite(rawRate) || rawRate <= 0) {
     throw new Error('Respuesta inválida de Frankfurter');
   }
 
