@@ -14,7 +14,7 @@ interface NewUser {
   passwordHash: string;
 }
 
-interface RegisteredUser {
+interface PublicUser {
   id: string;
   name: string;
   email: string;
@@ -25,13 +25,13 @@ export async function createUserWithWallet({
   name,
   email,
   passwordHash,
-}: NewUser): Promise<RegisteredUser> {
+}: NewUser): Promise<PublicUser> {
   const client = await pool.connect();
   let discardClient = false;
 
   try {
     await client.query('BEGIN');
-    const { rows: [user] } = await client.query<RegisteredUser>(
+    const { rows: [user] } = await client.query<PublicUser>(
       `INSERT INTO users (name, email, password_hash)
        VALUES ($1, $2, $3)
        RETURNING id, name, email, created_at AS "createdAt"`,
@@ -83,4 +83,33 @@ export async function createUserWithWallet({
   } finally {
     client.release(discardClient);
   }
+}
+
+interface UserCredentials {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+}
+
+export async function findUserByEmail(email: string): Promise<UserCredentials | undefined> {
+  const { rows: [user] } = await pool.query<UserCredentials>(
+    `SELECT id, name, email, password_hash AS "passwordHash"
+     FROM users
+     WHERE lower(email) = $1`,
+    [email],
+  );
+
+  return user;
+}
+
+export async function findUserProfileById(id: string): Promise<PublicUser | undefined> {
+  const { rows: [user] } = await pool.query<PublicUser>(
+    `SELECT id, name, email, created_at AS "createdAt"
+     FROM users
+     WHERE id = $1`,
+    [id],
+  );
+
+  return user;
 }
