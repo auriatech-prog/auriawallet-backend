@@ -13,7 +13,7 @@ export const app = express();
 
 app.disable('x-powered-by');
 app.use(helmet());
-app.use(cors({ origin: env.corsOrigin }));
+app.use(cors({ origin: env.corsOrigins }));
 app.use(express.json());
 
 app.get('/health', (_req, res) => {
