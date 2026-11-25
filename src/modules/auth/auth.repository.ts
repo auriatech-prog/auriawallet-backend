@@ -8,11 +8,9 @@ const INITIAL_DEMO_BALANCES = {
   ARS: '1000000.00',
 } satisfies Record<SupportedCurrency, string>;
 
-interface NewUser {
-  name: string;
-  email: string;
-  passwordHash: string;
-}
+type NewUser = { name: string; email: string } & (
+  { passwordHash: string } | { googleSub: string }
+);
 
 interface PublicUser {
   id: string;
@@ -21,22 +19,26 @@ interface PublicUser {
   createdAt: Date;
 }
 
-export async function createUserWithWallet({
-  name,
-  email,
-  passwordHash,
-}: NewUser): Promise<PublicUser> {
+export async function createUserWithWallet(input: NewUser): Promise<PublicUser> {
+  const { name, email } = input;
   const client = await pool.connect();
   let discardClient = false;
 
   try {
     await client.query('BEGIN');
-    const { rows: [user] } = await client.query<PublicUser>(
-      `INSERT INTO users (name, email, password_hash)
-       VALUES ($1, $2, $3)
-       RETURNING id, name, email, created_at AS "createdAt"`,
-      [name, email, passwordHash],
-    );
+    const { rows: [user] } = 'googleSub' in input
+      ? await client.query<PublicUser>(
+        `INSERT INTO users (name, email, google_sub)
+         VALUES ($1, $2, $3)
+         RETURNING id, name, email, created_at AS "createdAt"`,
+        [name, email, input.googleSub],
+      )
+      : await client.query<PublicUser>(
+        `INSERT INTO users (name, email, password_hash)
+         VALUES ($1, $2, $3)
+         RETURNING id, name, email, created_at AS "createdAt"`,
+        [name, email, input.passwordHash],
+      );
 
     if (!user) {
       throw new Error('El registro no devolvió el usuario creado');
@@ -89,7 +91,7 @@ interface UserCredentials {
   id: string;
   name: string;
   email: string;
-  passwordHash: string;
+  passwordHash: string | null;
 }
 
 export async function findUserByEmail(email: string): Promise<UserCredentials | undefined> {
@@ -112,4 +114,43 @@ export async function findUserProfileById(id: string): Promise<PublicUser | unde
   );
 
   return user;
+}
+
+async function findUserByGoogleSub(sub: string): Promise<PublicUser | undefined> {
+  const { rows: [user] } = await pool.query<PublicUser>(
+    `SELECT id, name, email, created_at AS "createdAt"
+     FROM users WHERE google_sub = $1`,
+    [sub],
+  );
+
+  return user;
+}
+
+export async function findOrCreateGoogleUser(identity: {
+  sub: string;
+  email: string;
+  name: string;
+}): Promise<PublicUser> {
+  const existingUser = await findUserByGoogleSub(identity.sub);
+  if (existingUser) return existingUser;
+
+  try {
+    return await createUserWithWallet({
+      googleSub: identity.sub,
+      email: identity.email,
+      name: identity.name,
+    });
+  } catch (error) {
+    const emailTaken = error instanceof AppError && error.code === 'EMAIL_ALREADY_REGISTERED';
+    const googleSubTaken = error instanceof Error &&
+      'code' in error && error.code === '23505' &&
+      'constraint' in error && error.constraint === 'users_google_sub_key';
+
+    if (emailTaken || googleSubTaken) {
+      const concurrentUser = await findUserByGoogleSub(identity.sub);
+      if (concurrentUser) return concurrentUser;
+    }
+
+    throw error;
+  }
 }
