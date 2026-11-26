@@ -1,40 +1,16 @@
-// src/shared/utils/decimal.ts
-const SCALE = 1_000_000n; // 6 decimales de precisión interna
+import { Decimal } from "decimal.js";
 
-function parseToScaledBigInt(value: string, scale = SCALE): bigint {
-  const normalized = value.trim();
-  if (!/^\d+(\.\d+)?$/.test(normalized)) {
-    throw new Error(`Valor decimal inválido: ${value}`);
-  }
+// Configuración financiera estándar (20 dígitos de precisión, redondeo bancario)
+Decimal.set({
+  precision: 20,
+  rounding: Decimal.ROUND_HALF_EVEN,
+});
 
-  const [intPart = '0', fracPart = ''] = normalized.split('.');
-  const scaleDigits = scale.toString().length - 1;
-  const paddedFrac = fracPart.padEnd(scaleDigits, '0').slice(0, scaleDigits);
-
-  return BigInt(intPart) * scale + BigInt(paddedFrac || '0');
-}
-
-function formatScaledBigInt(scaledValue: bigint, decimals = 6): string {
-  const isNegative = scaledValue < 0n;
-  const absValue = isNegative ? -scaledValue : scaledValue;
-  const factor = 10n ** BigInt(decimals);
-
-  const intPart = absValue / factor;
-  const fracPart = (absValue % factor)
-    .toString()
-    .padStart(decimals, '0')
-    .replace(/0+$/, '');
-
-  const sign = isNegative ? '-' : '';
-  return fracPart.length > 0 ? `${sign}${intPart.toString()}.${fracPart}` : `${sign}${intPart.toString()}`;
-}
-
-export function formatDecimal(num: number, decimals = 6): string {
-  if (!Number.isFinite(num)) {
-    return '0';
-  }
-  const fixed = num.toFixed(decimals);
-  return fixed.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
+/**
+ * Formatea un valor numérico o string a string decimal de 2 decimales (ej. "150000.00")
+ */
+export function toMoneyString(value: Decimal.Value): string {
+  return new Decimal(value).toFixed(2);
 }
 
 export function toMoneyString(value: string | number): string {
@@ -112,18 +88,66 @@ export function hasEnoughFunds(balance: string | number, debitAmount: string | n
 }
 
 /**
- * Multiplica dos strings decimales (ej. monto * tasa) y devuelve un string decimal.
+ * Formatea tasas de cambio hasta 10 decimales sin ceros innecesarios al final,
+ * compatible con NUMERIC(18, 10) de PostgreSQL (ej. "0.0006666667" o "0.92")
  */
-export function multiplyDecimalStrings(amountStr: string, rateStr: string, decimals = 6): string {
-  const amountScaled = parseToScaledBigInt(amountStr, SCALE);
-  const rateScaled = parseToScaledBigInt(rateStr, SCALE);
+export function toRateString(value: Decimal.Value): string {
+  const dec = new Decimal(value).toDecimalPlaces(10);
+  // Mantiene al menos 2 decimales si es entero o corto (ej. "1600.00", "0.92")
+  const str = dec.toString();
+  if (!str.includes(".")) return `${str}.00`;
+  const decimals = str.split(".")[1] ?? "";
+  return decimals.length === 1 ? `${str}0` : str;
+}
 
-  // (amount * 10^6) * (rate * 10^6) / 10^12 => escalado a 10^decimals
-  const product = amountScaled * rateScaled;
-  const outputFactor = 10n ** BigInt(decimals);
-  const denominator = SCALE * SCALE;
+/**
+ * Multiplica monto por tasa y redondea a 2 decimales
+ */
+export function multiplyMoney(amount: Decimal.Value, rate: Decimal.Value): string {
+  return new Decimal(amount).mul(new Decimal(rate)).toFixed(2);
+}
 
-  // Redondeo al entero más cercano
-  const scaledResult = (product * outputFactor + denominator / 2n) / denominator;
-  return formatScaledBigInt(scaledResult, decimals);
+/**
+ * Divide monto entre tasa y redondea a 2 decimales
+ */
+export function divideMoney(amount: Decimal.Value, rate: Decimal.Value): string {
+  const divisor = new Decimal(rate);
+  if (divisor.isZero()) {
+    throw new Error("La tasa de cambio no puede ser cero");
+  }
+  return new Decimal(amount).div(divisor).toFixed(2);
+}
+
+/**
+ * Suma dos montos exactos
+ */
+export function addMoney(a: Decimal.Value, b: Decimal.Value): string {
+  return new Decimal(a).plus(new Decimal(b)).toFixed(2);
+}
+
+/**
+ * Resta dos montos exactos (a - b)
+ */
+export function subtractMoney(a: Decimal.Value, b: Decimal.Value): string {
+  return new Decimal(a).minus(new Decimal(b)).toFixed(2);
+}
+
+/**
+ * Verifica si el saldo disponible cubre el monto a debitar (balance >= debitAmount)
+ */
+export function hasEnoughFunds(balance: Decimal.Value, debitAmount: Decimal.Value): boolean {
+  return new Decimal(balance).greaterThanOrEqualTo(new Decimal(debitAmount));
+}
+
+export function formatDecimal(value: Decimal.Value, decimals = 6): string {
+  const fixed = new Decimal(value).toFixed(decimals);
+  return fixed.replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "");
+}
+
+export function multiplyDecimalStrings(
+  amount: Decimal.Value,
+  rate: Decimal.Value,
+  decimals = 6
+): string {
+  return new Decimal(amount).mul(new Decimal(rate)).toFixed(decimals);
 }
