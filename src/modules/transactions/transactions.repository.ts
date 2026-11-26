@@ -4,7 +4,7 @@ export type CurrencyCode = "ARS" | "USD" | "EUR";
 
 export interface TransactionResponsePayload {
   transactionId: string;
-  type: "buy" | "sell";
+  type: "buy" | "sell" | "convert";
   fromCurrency: CurrencyCode;
   toCurrency: CurrencyCode;
   amountDebited: string;
@@ -24,7 +24,7 @@ interface ExecuteAtomicOperationInput {
   idempotencyKey: string;
   endpoint: string;
   rawPayload: unknown;
-  type: "buy" | "sell";
+  type: "buy" | "sell" | "convert";
   fromCurrency: CurrencyCode;
   toCurrency: CurrencyCode;
   amountDebited: string;
@@ -52,7 +52,7 @@ export async function executeAtomicOperation(
 
     const cached = await client.query<{
       id: string;
-      type: "buy" | "sell";
+      type: "buy" | "sell" | "convert";
       from_currency: CurrencyCode;
       to_currency: CurrencyCode;
       amount_debited: string;
@@ -176,4 +176,93 @@ export async function executeAtomicOperation(
   } finally {
     client.release();
   }
+}
+
+export interface TransactionHistoryItem {
+  id: string;
+  type: "buy" | "sell" | "convert";
+  fromCurrency: CurrencyCode;
+  toCurrency: CurrencyCode;
+  amountDebited: string;
+  amountCredited: string;
+  exchangeRate: string;
+  status: "completed";
+  createdAt: string;
+}
+
+export interface PaginatedTransactionsResult {
+  items: TransactionHistoryItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * Lista el historial paginado de transacciones del usuario autenticado
+ * ordenado de más reciente a más antiguo (created_at DESC).
+ */
+export async function findUserTransactionsPaginated(
+  userId: string,
+  limit: number,
+  offset: number
+): Promise<PaginatedTransactionsResult> {
+  const [countResult, rowsResult] = await Promise.all([
+    pool.query<{ total: string }>(
+      `SELECT COUNT(*)::text AS total
+       FROM transactions AS t
+       JOIN wallets AS w ON w.id = t.wallet_id
+       WHERE w.user_id = $1`,
+      [userId]
+    ),
+    pool.query<{
+      id: string;
+      type: "buy" | "sell" | "convert";
+      from_currency: CurrencyCode;
+      to_currency: CurrencyCode;
+      amount_debited: string;
+      amount_credited: string;
+      exchange_rate: string;
+      created_at: Date;
+    }>(
+      `SELECT
+         t.id,
+         t.type,
+         t.from_currency,
+         t.to_currency,
+         t.amount_debited::text AS amount_debited,
+         t.amount_credited::text AS amount_credited,
+         t.exchange_rate::text AS exchange_rate,
+         t.created_at
+       FROM transactions AS t
+       JOIN wallets AS w ON w.id = t.wallet_id
+       WHERE w.user_id = $1
+       ORDER BY t.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
+    ),
+  ]);
+
+  const total = Number(countResult.rows[0]?.total ?? 0);
+
+  const items: TransactionHistoryItem[] = rowsResult.rows.map((row) => ({
+    id: row.id,
+    type: row.type,
+    fromCurrency: row.from_currency,
+    toCurrency: row.to_currency,
+    amountDebited: row.amount_debited,
+    amountCredited: row.amount_credited,
+    exchangeRate: row.exchange_rate,
+    status: "completed",
+    createdAt:
+      row.created_at instanceof Date
+        ? row.created_at.toISOString()
+        : String(row.created_at),
+  }));
+
+  return {
+    items,
+    total,
+    limit,
+    offset,
+  };
 }

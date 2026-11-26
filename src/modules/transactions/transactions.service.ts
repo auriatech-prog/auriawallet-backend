@@ -3,21 +3,22 @@ import {
   toMoneyString,
   toRateString,
 } from "../../shared/utils/decimal.js";
-// Ajusta este import al nombre exacto de tu servicio del Sprint 1:
 import { resolveExchangeRate } from "../exchange-rates/exchange-rates.service.js";
 import {
   executeAtomicOperation,
+  findUserTransactionsPaginated,
   TransactionDomainError,
   type AtomicOperationResult,
   type CurrencyCode,
+  type PaginatedTransactionsResult,
   type TransactionResponsePayload,
 } from "./transactions.repository.js";
-import type { BuyTransactionInput, SellTransactionInput } from "./transactions.schema.js";
+import type {
+  BuyTransactionInput,
+  ConvertTransactionInput,
+  SellTransactionInput,
+} from "./transactions.schema.js";
 
-/**
- * Interfaz desacoplada para conectar notifications.service.ts de Aldana
- * cuando ella integre AWS SES.
- */
 export interface ReceiptNotifier {
   sendTransactionReceipt(params: {
     userId: string;
@@ -36,10 +37,6 @@ const defaultNoopNotifier: ReceiptNotifier = {
 export class TransactionsService {
   constructor(private readonly notifier: ReceiptNotifier = defaultNoopNotifier) {}
 
-  /**
-   * Compra USD o EUR pagando con ARS.
-   * Contrato: fromCurrency = "ARS", toCurrency = "USD" | "EUR", amountCredited = amount
-   */
   async buyCurrency(
     userId: string,
     idempotencyKey: string,
@@ -47,7 +44,6 @@ export class TransactionsService {
   ): Promise<AtomicOperationResult> {
     const targetCurrency: CurrencyCode = input.currency;
     const amountToReceive = toMoneyString(input.amount);
-
     const arsPerTargetUnit = await this.resolveRateToArs(targetCurrency);
     const amountDebitedArs = multiplyMoney(amountToReceive, arsPerTargetUnit);
     const effectiveRate = toRateString(1 / Number(arsPerTargetUnit));
@@ -68,14 +64,9 @@ export class TransactionsService {
     if (!result.isCached) {
       this.triggerReceiptNotification(userId, result.body);
     }
-
     return result;
   }
 
-  /**
-   * Vende USD o EUR recibiendo ARS.
-   * Contrato: fromCurrency = "USD" | "EUR", toCurrency = "ARS", amountDebited = amount
-   */
   async sellCurrency(
     userId: string,
     idempotencyKey: string,
@@ -83,7 +74,6 @@ export class TransactionsService {
   ): Promise<AtomicOperationResult> {
     const sourceCurrency: CurrencyCode = input.currency;
     const amountToSell = toMoneyString(input.amount);
-
     const arsPerSourceUnit = await this.resolveRateToArs(sourceCurrency);
     const amountCreditedArs = multiplyMoney(amountToSell, arsPerSourceUnit);
     const effectiveRate = toRateString(arsPerSourceUnit);
@@ -104,23 +94,57 @@ export class TransactionsService {
     if (!result.isCached) {
       this.triggerReceiptNotification(userId, result.body);
     }
-
     return result;
   }
 
-  /**
-   * Consulta cuántos ARS equivale 1 unidad de USD o EUR usando el servicio del Sprint 1.
-   */
+  async convertCurrency(
+    userId: string,
+    idempotencyKey: string,
+    input: ConvertTransactionInput
+  ): Promise<AtomicOperationResult> {
+    const amountToDebit = toMoneyString(input.amount);
+    const directRate = await this.resolvePairRate(
+      input.fromCurrency,
+      input.toCurrency
+    );
+    const amountCredited = multiplyMoney(amountToDebit, directRate);
+    const formattedRate = toRateString(directRate);
+
+    const result = await executeAtomicOperation({
+      userId,
+      idempotencyKey,
+      endpoint: "POST /api/transactions/convert",
+      rawPayload: input,
+      type: "convert",
+      fromCurrency: input.fromCurrency,
+      toCurrency: input.toCurrency,
+      amountDebited: amountToDebit,
+      amountCredited,
+      exchangeRate: formattedRate,
+    });
+
+    if (!result.isCached) {
+      this.triggerReceiptNotification(userId, result.body);
+    }
+    return result;
+  }
+
+  async getTransactionsHistory(
+    userId: string,
+    limit: number,
+    offset: number
+  ): Promise<PaginatedTransactionsResult> {
+    return findUserTransactionsPaginated(userId, limit, offset);
+  }
+
   private async resolveRateToArs(foreignCurrency: "USD" | "EUR"): Promise<string> {
     try {
       const ratesData = await resolveExchangeRate(foreignCurrency, "ARS");
       const rate = ratesData.rate;
-
       if (!rate || Number(rate) <= 0) {
         throw new Error("Tasa no disponible");
       }
-
-      return String(rate);
+      return rate;
     } catch {
       throw new TransactionDomainError(
         503,
@@ -130,9 +154,25 @@ export class TransactionsService {
     }
   }
 
-  /**
-   * Dispara el comprobante de forma asíncrona sin bloquear la respuesta 201.
-   */
+  private async resolvePairRate(
+    fromCurrency: CurrencyCode,
+    toCurrency: CurrencyCode
+  ): Promise<string> {
+    try {
+      const result = await resolveExchangeRate(fromCurrency, toCurrency);
+      if (!result.rate || Number(result.rate) <= 0) {
+        throw new Error("Par de monedas sin tasa disponible");
+      }
+      return result.rate;
+    } catch {
+      throw new TransactionDomainError(
+        503,
+        "EXCHANGE_RATE_UNAVAILABLE",
+        "El servicio de cotizaciones no está disponible temporalmente. Intente nuevamente."
+      );
+    }
+  }
+
   private triggerReceiptNotification(
     userId: string,
     transaction: TransactionResponsePayload

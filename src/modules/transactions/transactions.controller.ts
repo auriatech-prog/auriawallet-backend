@@ -3,7 +3,9 @@ import { ZodError } from "zod";
 import { TransactionDomainError } from "./transactions.repository.js";
 import {
   buyTransactionSchema,
+  convertTransactionSchema,
   idempotencyHeaderSchema,
+  listTransactionsQuerySchema,
   sellTransactionSchema,
 } from "./transactions.schema.js";
 import { transactionsService } from "./transactions.service.js";
@@ -80,6 +82,48 @@ export async function postSellTransaction(req: Request, res: Response): Promise<
     );
 
     return res.status(result.statusCode).json(result.body);
+  } catch (error) {
+    return handleControllerError(res, error);
+  }
+}
+
+export async function postConvertTransaction(req: Request, res: Response): Promise<Response> {
+  try {
+    const userId = res.locals.userId as string | undefined;
+    if (!userId) {
+      return res.status(401).json({
+        error: { code: "UNAUTHORIZED", message: "Token de autenticación requerido." },
+      });
+    }
+
+    const headers = idempotencyHeaderSchema.parse(req.headers);
+    const body = convertTransactionSchema.parse(req.body);
+
+    const result = await transactionsService.convertCurrency(
+      userId,
+      headers["idempotency-key"],
+      body
+    );
+
+    return res.status(result.statusCode).json(result.body);
+  } catch (error) {
+    return handleControllerError(res, error);
+  }
+}
+
+export async function getTransactions(req: Request, res: Response): Promise<Response> {
+  try {
+    const userId = res.locals.userId as string | undefined;
+    if (!userId) {
+      return res.status(401).json({
+        error: { code: "UNAUTHORIZED", message: "Token de autenticación requerido." },
+      });
+    }
+
+    const { limit, offset } = listTransactionsQuerySchema.parse(req.query);
+    const history = await transactionsService.getTransactionsHistory(userId, limit, offset);
+
+    return res.status(200).json(history);
   } catch (error) {
     return handleControllerError(res, error);
   }
