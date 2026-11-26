@@ -1,10 +1,49 @@
 import { pool } from "../../config/database.js";
-import { toMoneyString, toRateString } from "../../shared/utils/decimal.js";
 import {
   type ChatProviderResponse,
   generateChatReply,
   type WalletReadOnlyContext,
 } from "./chat.provider.js";
+
+function formatDecimal(value: string, decimals: number, minimumDecimals = 0): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!match) {
+    throw new Error(`Valor decimal inválido: ${value}`);
+  }
+
+  const [, sign, whole = "0", fraction = ""] = match;
+  const factor = 10n ** BigInt(decimals);
+  let units = BigInt(whole) * factor +
+    BigInt(fraction.slice(0, decimals).padEnd(decimals, "0") || "0");
+  const discarded = fraction.slice(decimals);
+  if (discarded) {
+    const firstDiscarded = discarded[0] ?? "0";
+    const remainingNonZero = /[1-9]/.test(discarded.slice(1));
+    if (
+      firstDiscarded > "5" ||
+      (firstDiscarded === "5" && (remainingNonZero || units % 2n === 1n))
+    ) {
+      units += 1n;
+    }
+  }
+
+  const prefix = sign === "-" && units > 0n ? "-" : "";
+  const integer = (units / factor).toString();
+  const decimalPart = (units % factor).toString().padStart(decimals, "0");
+  const trimmedDecimal = decimalPart.replace(/0+$/, "");
+  const formattedDecimal = trimmedDecimal.padEnd(minimumDecimals, "0");
+  return formattedDecimal
+    ? `${prefix}${integer}.${formattedDecimal}`
+    : `${prefix}${integer}`;
+}
+
+function toMoneyString(value: string): string {
+  return formatDecimal(value, 2, 2);
+}
+
+function toRateString(value: string): string {
+  return formatDecimal(value, 10, 2);
+}
 
 export class ChatServiceError extends Error {
   constructor(
