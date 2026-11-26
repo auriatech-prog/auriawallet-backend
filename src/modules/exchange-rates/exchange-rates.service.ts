@@ -82,3 +82,22 @@ export async function resolveExchangeRate(
 
   return exchangeRatesService.getExchangeRate({ from, to, amount });
 }
+
+export async function getExchangeRates(): Promise<{
+  rates: Record<string, Record<string, string>>;
+}> {
+  const currencies: SupportedCurrency[] = ['ARS', 'EUR', 'USD'];
+  const rates: Record<string, Record<string, string>> = {};
+
+  await Promise.all(currencies.map(async (from) => {
+    rates[from] = { [from]: '1' };
+    await Promise.all(currencies
+      .filter((to) => to !== from)
+      .map(async (to) => {
+        const result = await resolveExchangeRate(from, to);
+        rates[from]![to] = result.rate;
+      }));
+  }));
+
+  return { rates };
+}
