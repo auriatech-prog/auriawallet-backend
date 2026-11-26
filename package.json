@@ -23,12 +23,14 @@
   },
   "homepage": "https://github.com/auriatech-prog/auriawallet-backend#readme",
   "dependencies": {
+    "@google/genai": "^3.6.1",
     "cors": "^2.8.6",
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
     "helmet": "^8.3.0",
     "jose": "^6.2.18",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

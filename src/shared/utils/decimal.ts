@@ -37,6 +37,80 @@ export function formatDecimal(num: number, decimals = 6): string {
   return fixed.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
 }
 
+export function toMoneyString(value: string | number): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(value).trim());
+  if (!match) {
+    throw new Error(`Valor decimal inválido: ${value}`);
+  }
+
+  const [, sign, whole = "0", fraction = ""] = match;
+  let minorUnits =
+    BigInt(whole) * 100n + BigInt(fraction.padEnd(3, "0").slice(0, 2) || "0");
+  if ((fraction[2] ?? "0") >= "5") {
+    minorUnits += 1n;
+  }
+
+  const prefix = sign === "-" && minorUnits > 0n ? "-" : "";
+  return `${prefix}${minorUnits / 100n}.${(minorUnits % 100n).toString().padStart(2, "0")}`;
+}
+
+export function toRateString(value: string | number): string {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    throw new Error(`Valor decimal inválido: ${value}`);
+  }
+  return formatDecimal(numericValue, 10);
+}
+
+function parseMinorUnits(value: string | number): bigint {
+  const match = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(String(value).trim());
+  if (!match) {
+    throw new Error(`Valor decimal inválido: ${value}`);
+  }
+  const [, sign, whole = "0", fraction = ""] = match;
+  const units = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+  return sign === "-" ? -units : units;
+}
+
+function formatMinorUnits(value: bigint): string {
+  const sign = value < 0n ? "-" : "";
+  const absolute = value < 0n ? -value : value;
+  return `${sign}${absolute / 100n}.${(absolute % 100n).toString().padStart(2, "0")}`;
+}
+
+export function addMoney(a: string | number, b: string | number): string {
+  return formatMinorUnits(parseMinorUnits(a) + parseMinorUnits(b));
+}
+
+export function subtractMoney(a: string | number, b: string | number): string {
+  return formatMinorUnits(parseMinorUnits(a) - parseMinorUnits(b));
+}
+
+export function multiplyMoney(amount: string | number, rate: string | number): string {
+  const parse = (value: string | number) => {
+    const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(value).trim());
+    if (!match) {
+      throw new Error(`Valor decimal inválido: ${value}`);
+    }
+    const [, sign, whole = "0", fraction = ""] = match;
+    const scale = 10n ** BigInt(fraction.length);
+    const units = BigInt(whole) * scale + BigInt(fraction || "0");
+    return { units: sign === "-" ? -units : units, scale };
+  };
+  const parsedAmount = parse(amount);
+  const parsedRate = parse(rate);
+  const numerator = parsedAmount.units * parsedRate.units * 100n;
+  const denominator = parsedAmount.scale * parsedRate.scale;
+  const rounded =
+    (numerator + (numerator >= 0n ? denominator / 2n : -(denominator / 2n))) /
+    denominator;
+  return formatMinorUnits(rounded);
+}
+
+export function hasEnoughFunds(balance: string | number, debitAmount: string | number): boolean {
+  return parseMinorUnits(balance) >= parseMinorUnits(debitAmount);
+}
+
 /**
  * Multiplica dos strings decimales (ej. monto * tasa) y devuelve un string decimal.
  */
