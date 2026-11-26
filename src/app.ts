@@ -5,6 +5,7 @@ import { env } from './config/env.js';
 import { requireAuth } from './middlewares/auth.middleware.js';
 import { errorMiddleware } from './middlewares/error.middleware.js';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { chatRouter } from './modules/chat/chat.routes.js';
 import { exchangeRatesRouter } from './modules/exchange-rates/exchange-rates.routes.js';
 import { walletsRouter } from './modules/wallets/wallets.routes.js';
 import { transactionsRouter } from './modules/transactions/transactions.routes.js';
@@ -22,6 +23,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/chat', chatRouter);
 app.use('/api/wallet', walletsRouter);
 app.use('/api/exchange-rates', requireAuth, exchangeRatesRouter);
 app.use('/api/transactions', transactionsRouter);

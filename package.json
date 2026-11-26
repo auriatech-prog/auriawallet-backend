@@ -23,6 +23,7 @@
   },
   "homepage": "https://github.com/auriatech-prog/auriawallet-backend#readme",
   "dependencies": {
+    "@google/genai": "^3.6.1",
     "cors": "^2.8.6",
     "decimal.js": "^10.6.0",
     "dotenv": "^18.0.10",

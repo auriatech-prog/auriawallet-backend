@@ -244,10 +244,6 @@ export interface PaginatedTransactionsResult {
   offset: number;
 }
 
-/**
- * Lista el historial paginado de transacciones del usuario autenticado
- * ordenado de más reciente a más antiguo (created_at DESC).
- */
 export async function findUserTransactionsPaginated(
   userId: string,
   limit: number,
