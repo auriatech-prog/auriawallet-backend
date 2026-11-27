@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { pool } from "../../config/database.js";
+import { pool } from "../../database/db.js";
 
 export type CurrencyCode = "ARS" | "USD" | "EUR";
 
